@@ -39,18 +39,12 @@ etiqueta que usan los manifiestos (`1.0.0`; si publicas otra, cámbiala en los
 
 ## 2. Base de datos (RDS)
 
-1. Crea una instancia PostgreSQL y permite el puerto 5432 desde el *security
-   group* de los nodos de EKS.
-2. Copia `database/rds/bootstrap.env.example` a `database/rds/bootstrap.env`,
-   completa el endpoint y las contraseñas (tres roles: `auth_app`,
-   `catalog_app`, `orders_app`) y ejecuta:
+Crea la instancia en la **misma VPC que el cluster**, sin acceso público, con
+el nombre de base de datos inicial `bookstore` y un *security group* que permita
+PostgreSQL (puerto 5432) desde el CIDR de la VPC.
 
-   ```bash
-   bash database/rds/bootstrap.sh
-   ```
-
-   Termina con `Verification completed successfully`: crea los esquemas, los
-   roles y el seed, y comprueba que cada servicio solo ve su esquema.
+La base no se puede alcanzar desde fuera de la VPC, así que se inicializa
+**desde dentro del cluster** (paso 6).
 
 ## 3. Bucket de S3 y sitio en Netlify
 
@@ -58,7 +52,7 @@ etiqueta que usan los manifiestos (`1.0.0`; si publicas otra, cámbiala en los
 - **SPA:** crea el sitio en Netlify conectado a este repositorio, con *Base
   directory* = `frontend` (usa `frontend/netlify.toml`). Anota su dominio
   (`<algo>.netlify.app`): lo necesita el BFF en `CORS_ORIGINS` (paso 4). Aún no
-  despliegues: falta el DNS del ALB (paso 7).
+  despliegues: falta el DNS del ALB (paso 8).
 
 ## 4. Reemplazar los marcadores
 
@@ -86,7 +80,29 @@ kubectl -n bookstore create secret generic db-orders  --from-literal=DB_USER=ord
 kubectl -n bookstore create secret generic jwt        --from-literal=AUTH_JWT_SECRET='<mínimo 32 caracteres>'
 ```
 
-## 6. Aplicar
+## 6. Inicializar la base de datos
+
+Un pod temporal con la imagen de PostgreSQL copia la carpeta `database/` y
+ejecuta `bootstrap.sh` contra RDS (crea los esquemas, los roles y el seed):
+
+```bash
+aws eks update-kubeconfig --name <cluster> --region us-east-1
+kubectl -n bookstore run dbtool --image=postgres:17 --restart=Never -- sleep 3600
+kubectl -n bookstore wait --for=condition=Ready pod/dbtool
+kubectl cp database bookstore/dbtool:/database
+kubectl -n bookstore exec dbtool -- env \
+  DB_HOST=<endpoint-de-rds> DB_ADMIN_USER=bookstore_admin DB_ADMIN_PASSWORD='<...>' \
+  AUTH_DB_PASSWORD='<...>' CATALOG_DB_PASSWORD='<...>' ORDERS_DB_PASSWORD='<...>' \
+  INGEST_DB_PASSWORD='<...>' bash /database/rds/bootstrap.sh
+kubectl -n bookstore delete pod dbtool
+```
+
+Las contraseñas de los tres roles son las mismas del paso 5. Debe terminar con
+`Verification completed successfully`. En Git Bash (Windows) antepón
+`MSYS_NO_PATHCONV=1` a los comandos `kubectl cp` y `kubectl exec`, o convierte
+las rutas `/database/...` en rutas de Windows.
+
+## 7. Aplicar
 
 ```bash
 aws eks update-kubeconfig --name <cluster> --region us-east-1
@@ -100,7 +116,7 @@ muestran `2/2`: la aplicación y el sidecar Vector). Si un pod no arranca,
 común es una variable mal escrita, porque los servicios validan su
 configuración al iniciar.
 
-## 7. Conectar Netlify con el ALB
+## 8. Conectar Netlify con el ALB
 
 El ALB tarda un par de minutos en tener DNS:
 
@@ -117,7 +133,7 @@ confía en 2 proxies delante: Netlify y el ALB (`HTTP_TRUST_PROXY_HOPS=2`).
 El tramo Netlify → ALB va por HTTP; es aceptable en el laboratorio. Con un
 dominio propio se le pondría un certificado al ALB.
 
-## 8. Verificar
+## 9. Verificar
 
 ```bash
 curl https://<algo>.netlify.app/api/books?limit=2   # lista libros (pasa por todo el camino)
