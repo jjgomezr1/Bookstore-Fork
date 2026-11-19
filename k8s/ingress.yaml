@@ -1,21 +1,11 @@
-# Entrada al cluster: un Application Load Balancer (EKS Auto Mode) que
-# publica /api hacia el BFF. La SPA no pasa por aqui: vive en Netlify, que
-# reenvia (proxy) /api/* a este ALB (ver frontend/netlify.toml).
-#
-# IngressClass y IngressClassParams son recursos del cluster (no tienen
-# namespace); el Ingress si vive en "bookstore".
+# ALB (EKS Auto Mode) que publica /api hacia el BFF; la SPA vive en Netlify.
 apiVersion: eks.amazonaws.com/v1
 kind: IngressClassParams
 metadata:
   name: alb
 spec:
   scheme: internet-facing
-  # Por defecto el ALB descubre las subredes publicas por sus etiquetas.
-  # Si no las encuentra, indicalas aqui:
-  # subnets:
-  #   ids:
-  #     - subnet-REPLACE_PUBLIC_A
-  #     - subnet-REPLACE_PUBLIC_B
+  # El ALB busca las subredes por etiqueta; si no las halla, agrega subnets.ids aqui
 ---
 apiVersion: networking.k8s.io/v1
 kind: IngressClass

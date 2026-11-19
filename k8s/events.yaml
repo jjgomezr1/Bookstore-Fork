@@ -1,5 +1,4 @@
-# Servicio Events: clickstream (gRPC :50053). No usa base de datos.
-# Escribe los eventos en un archivo; el sidecar Vector lo envia a S3.
+# Events: clickstream (gRPC :50053); sin base de datos, Vector envia el archivo a S3.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -44,8 +43,7 @@ spec:
               app: events
 
       volumes:
-        # Carpeta compartida por los dos contenedores del pod: el servicio
-        # escribe el archivo y Vector lo lee. Vive y muere con el pod.
+        # Carpeta compartida entre la app (escribe) y Vector (lee)
         - name: clickstream-logs
           emptyDir: {}
         # Donde Vector guarda hasta que linea del archivo ya envio
@@ -87,8 +85,7 @@ spec:
         - name: vector
           image: timberio/vector:0.43.1-alpine
           args: ["--config", "/etc/vector/vector.yaml"]
-          # Credenciales de AWS: del rol del nodo o, si no son alcanzables,
-          # del Secret opcional "aws-credentials" (ver k8s/README.md)
+          # Credenciales de AWS: rol del nodo o Secret opcional aws-credentials
           envFrom:
             - secretRef:
                 name: aws-credentials

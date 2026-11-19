@@ -1,5 +1,4 @@
-# Servicio Orders: pedidos (gRPC :50054, esquema "orders").
-# Para crear un pedido llama a Catalog (reservar/liberar stock): saga.
+# Orders: pedidos (gRPC :50054, esquema "orders"); reserva stock en Catalog.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -10,8 +9,7 @@ data:
   SERVICE_NAME: "orders"
   GRPC_BIND_ADDRESS: "0.0.0.0:50054"
 
-  # Nombre completo del Service headless de Catalog. El cliente le antepone
-  # "dns:///" y usa round_robin entre las IPs de sus pods.
+  # Catalog: el cliente agrega "dns:///" y reparte con round_robin
   CATALOG_GRPC_ADDRESS: "catalog.bookstore.svc.cluster.local:50051"
 
   DB_HOST: "REPLACE_WITH_RDS_ENDPOINT"

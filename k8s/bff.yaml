@@ -1,6 +1,4 @@
-# BFF: unico servicio HTTP (:5001). Recibe las peticiones del ALB, valida la
-# cookie/JWT y llama por gRPC a auth, catalog, orders y events.
-# No usa base de datos. Escribe el access log para Vector (sidecar).
+# BFF: unico servicio HTTP (:5001); valida la sesion y llama por gRPC a los demas.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,17 +10,14 @@ data:
   PORT: "5001"
   API_BASE_PATH: "/api"
 
-  # Dominio de Netlify desde el que se sirve la SPA. Las peticiones llegan por el
-  # proxy de Netlify (mismo origen), pero el navegador igual envia el encabezado
-  # Origin en los POST y el BFF solo acepta los origenes de esta lista.
+  # Dominio de Netlify (el BFF solo acepta los origenes de esta lista)
   CORS_ORIGINS: "https://REPLACE_WITH_NETLIFY_DOMAIN"
 
   # Proxies delante de cada pod: el proxy de Netlify y el ALB
   HTTP_TRUST_PROXY_HOPS: "2"
   HTTP_JSON_BODY_LIMIT: "32kb"
 
-  # Servicios internos (nombre completo del Service headless). El cliente
-  # antepone "dns:///" y reparte las llamadas con round_robin.
+  # Servicios internos (el cliente agrega "dns:///" y reparte con round_robin)
   AUTH_GRPC_ADDRESS: "auth.bookstore.svc.cluster.local:50052"
   CATALOG_GRPC_ADDRESS: "catalog.bookstore.svc.cluster.local:50051"
   ORDERS_GRPC_ADDRESS: "orders.bookstore.svc.cluster.local:50054"
@@ -110,8 +105,7 @@ spec:
               port: http
             initialDelaySeconds: 10
             periodSeconds: 10
-          # Al apagar el pod, espera unos segundos antes de recibir SIGTERM
-          # para que el ALB lo saque de sus destinos y no se pierdan peticiones.
+          # Espera 5 s antes de apagar para que el ALB saque al pod de sus destinos
           lifecycle:
             preStop:
               exec:
@@ -127,10 +121,7 @@ spec:
         - name: vector
           image: timberio/vector:0.43.1-alpine
           args: ["--config", "/etc/vector/vector.yaml"]
-          # Credenciales de AWS: Vector las toma del rol del nodo si el pod
-          # puede alcanzarlo. Si no, crea el Secret "aws-credentials" (ver
-          # k8s/README.md) y Vector lo usa; "optional" evita que el pod falle
-          # si ese Secret no existe.
+          # Credenciales de AWS: rol del nodo o, si no llega, el Secret opcional aws-credentials
           envFrom:
             - secretRef:
                 name: aws-credentials
@@ -169,8 +160,7 @@ metadata:
   labels:
     app: bff
 spec:
-  # Service normal (ClusterIP): al BFF le llega HTTP desde el ALB, no gRPC,
-  # asi que no necesita ser headless.
+  # ClusterIP normal: al BFF le llega HTTP, no gRPC
   type: ClusterIP
   selector:
     app: bff

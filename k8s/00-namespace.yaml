@@ -1,6 +1,4 @@
-# Namespace donde viven todos los recursos de BookStore.
-# Dentro del namespace, los servicios se encuentran por su nombre:
-#   catalog.bookstore.svc.cluster.local  (o simplemente "catalog")
+# Namespace de todos los recursos de BookStore.
 apiVersion: v1
 kind: Namespace
 metadata:

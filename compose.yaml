@@ -1,24 +1,12 @@
-# Local environment: PostgreSQL, database bootstrap, the BFF, the four
-# gRPC microservices (auth, catalog, orders, events) and the frontend.
-#
-# Usage: docker compose up --build
-#
-# Request flow:
-#   browser -> frontend (Nginx) -> bff (HTTP) -> auth / catalog / orders / events (gRPC)
-#                                                 orders -> catalog (gRPC, stock saga)
+# Local environment: PostgreSQL, bootstrap, BFF, gRPC services and frontend (docker compose up --build)
 
-# ------------------------------------------------------------
-# Reusable blocks (YAML anchors). "x-" keys are ignored by Compose;
-# "&name" defines a block and "<<: *name" pastes it into a service.
-# ------------------------------------------------------------
+# Reusable blocks (YAML anchors): "&name" defines, "<<: *name" pastes
 
-# Every Node image is built from the repository root, because the
-# Dockerfiles copy packages/common and proto/ besides the service.
+# Node images build from the repo root (they copy packages/common and proto/)
 x-node-build-args: &node-build-args
   NODE_IMAGE: ${NODE_IMAGE:?NODE_IMAGE is required}
 
-# Connection settings shared by every service that uses PostgreSQL.
-# Each service adds its own DB_SCHEMA, DB_USER and DB_PASSWORD.
+# Shared PostgreSQL settings; each service adds DB_SCHEMA, DB_USER, DB_PASSWORD
 x-db-client-env: &db-client-env
   DB_HOST: ${DB_HOST:?DB_HOST is required}
   DB_PORT: ${DB_PORT:?DB_PORT is required}
@@ -46,9 +34,7 @@ x-log-env: &log-env
   CLICKSTREAM_FILE_ENABLED: ${CLICKSTREAM_FILE_ENABLED:?CLICKSTREAM_FILE_ENABLED is required}
   CLICKSTREAM_FILE_PATH: ${CLICKSTREAM_FILE_PATH:?CLICKSTREAM_FILE_PATH is required}
 
-# The gRPC services have no HTTP /health endpoint: a service is
-# healthy when its gRPC port (taken from GRPC_BIND_ADDRESS) accepts
-# TCP connections.
+# gRPC has no HTTP /health: healthy when the gRPC port accepts TCP connections
 x-grpc-healthcheck: &grpc-healthcheck
   test:
     [
@@ -136,9 +122,7 @@ services:
     networks:
       - back-tier
 
-  # ----------------------------------------------------------
   # gRPC microservices (only reachable inside back-tier)
-  # ----------------------------------------------------------
 
   auth:
     image: ${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}/bookstore-auth:${IMAGE_TAG:?IMAGE_TAG is required}
@@ -261,9 +245,7 @@ services:
     networks:
       - back-tier
 
-  # ----------------------------------------------------------
   # BFF: the only HTTP entry point for the SPA
-  # ----------------------------------------------------------
 
   bff:
     image: ${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}/bookstore-bff:${IMAGE_TAG:?IMAGE_TAG is required}

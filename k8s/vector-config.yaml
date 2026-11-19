@@ -1,9 +1,4 @@
-# Configuracion del sidecar Vector, compartida por el BFF y Events.
-#
-# El servicio escribe el clickstream en /usr/src/app/logs/clickstream.log
-# (un volumen emptyDir). El sidecar monta ese mismo volumen, lee el archivo
-# linea por linea y lo envia a S3 comprimido, por lotes de 60 s.
-# ${...} lo resuelve Vector con las variables de entorno del contenedor.
+# Sidecar Vector (BFF y Events): lee el clickstream del volumen compartido y lo envia a S3.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -27,8 +22,7 @@ data:
           - clickstream
         bucket: "${S3_BUCKET}"
         region: "${AWS_REGION}"
-        # clickstream/<servicio>/<pod>/AAAA/MM/DD/: un prefijo por pod evita
-        # que dos replicas pisen el mismo objeto.
+        # Un prefijo por servicio y pod: dos replicas nunca escriben el mismo objeto
         key_prefix: "clickstream/${SERVICE_NAME}/${POD_NAME}/%Y/%m/%d/"
         compression: gzip
         encoding:

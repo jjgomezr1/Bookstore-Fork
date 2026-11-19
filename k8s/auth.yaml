@@ -1,5 +1,4 @@
-# Servicio Auth: clientes y sesion (gRPC :50052, esquema "auth").
-# Emite los JWT; el BFF los verifica con el mismo secreto.
+# Auth: clientes y sesion (gRPC :50052, esquema "auth").
 apiVersion: v1
 kind: ConfigMap
 metadata:
