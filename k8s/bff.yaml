@@ -1,0 +1,178 @@
+# BFF: unico servicio HTTP (:5001). Recibe las peticiones del ALB, valida la
+# cookie/JWT y llama por gRPC a auth, catalog, orders y events.
+# No usa base de datos. Escribe el access log para Vector (sidecar).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bff-config
+  namespace: bookstore
+data:
+  NODE_ENV: "production"
+  SERVICE_NAME: "bff"
+  PORT: "5001"
+  API_BASE_PATH: "/api"
+
+  # Dominio de Cloudflare desde el que se sirve la SPA
+  CORS_ORIGINS: "https://REPLACE_WITH_CLOUDFLARE_DOMAIN"
+
+  # Proxies delante de cada pod: Cloudflare y el ALB
+  HTTP_TRUST_PROXY_HOPS: "2"
+  HTTP_JSON_BODY_LIMIT: "32kb"
+
+  # Servicios internos (nombre completo del Service headless). El cliente
+  # antepone "dns:///" y reparte las llamadas con round_robin.
+  AUTH_GRPC_ADDRESS: "auth.bookstore.svc.cluster.local:50052"
+  CATALOG_GRPC_ADDRESS: "catalog.bookstore.svc.cluster.local:50051"
+  ORDERS_GRPC_ADDRESS: "orders.bookstore.svc.cluster.local:50054"
+  EVENTS_GRPC_ADDRESS: "events.bookstore.svc.cluster.local:50053"
+
+  AUTH_JWT_ALGORITHM: "HS256"
+  AUTH_JWT_ISSUER: "bookstore-api"
+  AUTH_JWT_AUDIENCE: "bookstore-web"
+  AUTH_TOKEN_TTL_SECONDS: "28800"
+  AUTH_COOKIE_NAME: "bookstore_session"
+  # La SPA se sirve por HTTPS (Cloudflare), asi que la cookie puede ser Secure
+  AUTH_COOKIE_SECURE: "true"
+  AUTH_COOKIE_SAME_SITE: "lax"
+  AUTH_COOKIE_PATH: "/api"
+
+  ACCESS_LOG_ENABLED: "true"
+  ACCESS_LOG_EXCLUDE_PATHS: "/health"
+  ACCESS_LOG_MAX_FIELD_LENGTH: "2048"
+  ACCESS_LOG_REQUEST_ID_HEADER: "X-Request-Id"
+  CLICKSTREAM_FILE_ENABLED: "true"
+  CLICKSTREAM_FILE_PATH: "/usr/src/app/logs/clickstream.log"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bff
+  namespace: bookstore
+  labels:
+    app: bff
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bff
+  template:
+    metadata:
+      labels:
+        app: bff
+    spec:
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: bff
+
+      volumes:
+        - name: clickstream-logs
+          emptyDir: {}
+        - name: vector-data
+          emptyDir: {}
+        - name: vector-config
+          configMap:
+            name: vector-config
+
+      containers:
+        - name: bff
+          image: REPLACE_WITH_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/bookstore-bff:1.0.0
+          ports:
+            - name: http
+              containerPort: 5001
+          envFrom:
+            - configMapRef:
+                name: bff-config
+          env:
+            - name: AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jwt
+                  key: AUTH_JWT_SECRET
+          volumeMounts:
+            - name: clickstream-logs
+              mountPath: /usr/src/app/logs
+          # El BFF si habla HTTP: tiene /health
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          # Al apagar el pod, espera unos segundos antes de recibir SIGTERM
+          # para que el ALB lo saque de sus destinos y no se pierdan peticiones.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+
+        # Sidecar: lee el access log del volumen compartido y lo envia a S3
+        - name: vector
+          image: timberio/vector:0.43.1-alpine
+          args: ["--config", "/etc/vector/vector.yaml"]
+          # Credenciales de AWS: Vector las toma del rol del nodo si el pod
+          # puede alcanzarlo. Si no, crea el Secret "aws-credentials" (ver
+          # k8s/README.md) y Vector lo usa; "optional" evita que el pod falle
+          # si ese Secret no existe.
+          envFrom:
+            - secretRef:
+                name: aws-credentials
+                optional: true
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+            - name: S3_BUCKET
+              value: REPLACE_WITH_CLICKSTREAM_BUCKET
+            - name: SERVICE_NAME
+              value: bff
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+            - name: clickstream-logs
+              mountPath: /logs
+              readOnly: true
+            - name: vector-data
+              mountPath: /var/lib/vector
+            - name: vector-config
+              mountPath: /etc/vector
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bff
+  namespace: bookstore
+  labels:
+    app: bff
+spec:
+  # Service normal (ClusterIP): al BFF le llega HTTP desde el ALB, no gRPC,
+  # asi que no necesita ser headless.
+  type: ClusterIP
+  selector:
+    app: bff
+  ports:
+    - name: http
+      port: 5001
+      targetPort: http

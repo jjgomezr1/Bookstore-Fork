@@ -1,0 +1,105 @@
+# Servicio Orders: pedidos (gRPC :50054, esquema "orders").
+# Para crear un pedido llama a Catalog (reservar/liberar stock): saga.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orders-config
+  namespace: bookstore
+data:
+  NODE_ENV: "production"
+  SERVICE_NAME: "orders"
+  GRPC_BIND_ADDRESS: "0.0.0.0:50054"
+
+  # Nombre completo del Service headless de Catalog. El cliente le antepone
+  # "dns:///" y usa round_robin entre las IPs de sus pods.
+  CATALOG_GRPC_ADDRESS: "catalog.bookstore.svc.cluster.local:50051"
+
+  DB_HOST: "REPLACE_WITH_RDS_ENDPOINT"
+  DB_PORT: "5432"
+  DB_NAME: "bookstore"
+  DB_SCHEMA: "orders"
+  DB_SSL: "true"
+  DB_SSL_REJECT_UNAUTHORIZED: "false"
+  DB_POOL_MAX: "10"
+  DB_IDLE_TIMEOUT_MS: "30000"
+  DB_CONNECTION_TIMEOUT_MS: "5000"
+
+  ORDERS_MAX_DISTINCT_ITEMS: "100"
+  ORDERS_MAX_QUANTITY_PER_ITEM: "1000"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+  namespace: bookstore
+  labels:
+    app: orders
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: orders
+  template:
+    metadata:
+      labels:
+        app: orders
+    spec:
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: orders
+      containers:
+        - name: orders
+          image: REPLACE_WITH_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/bookstore-orders:1.0.0
+          ports:
+            - name: grpc
+              containerPort: 50054
+          envFrom:
+            - configMapRef:
+                name: orders-config
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: db-orders
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-orders
+                  key: DB_PASSWORD
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders
+  namespace: bookstore
+  labels:
+    app: orders
+spec:
+  clusterIP: None # headless, para round_robin
+  selector:
+    app: orders
+  ports:
+    - name: grpc
+      port: 50054
+      targetPort: grpc

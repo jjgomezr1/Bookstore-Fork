@@ -1,0 +1,117 @@
+# Servicio Catalog: libros y stock (gRPC :50051, esquema "catalog").
+#
+# Cada servicio se define con tres recursos:
+#   ConfigMap  -> variables no secretas
+#   Deployment -> los pods (2 replicas)
+#   Service    -> como los encuentran los demas (aqui, "headless")
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-config
+  namespace: bookstore
+data:
+  NODE_ENV: "production"
+  SERVICE_NAME: "catalog"
+  GRPC_BIND_ADDRESS: "0.0.0.0:50051"
+
+  # Instancia RDS compartida; este servicio solo ve su esquema
+  DB_HOST: "REPLACE_WITH_RDS_ENDPOINT"
+  DB_PORT: "5432"
+  DB_NAME: "bookstore"
+  DB_SCHEMA: "catalog"
+  DB_SSL: "true"
+  DB_SSL_REJECT_UNAUTHORIZED: "false"
+  DB_POOL_MAX: "10"
+  DB_IDLE_TIMEOUT_MS: "30000"
+  DB_CONNECTION_TIMEOUT_MS: "5000"
+
+  BOOKS_DEFAULT_LIMIT: "24"
+  BOOKS_MAX_LIMIT: "100"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  namespace: bookstore
+  labels:
+    app: catalog
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: catalog
+  template:
+    metadata:
+      labels:
+        app: catalog
+    spec:
+      # Tiempo para que el pod cierre bien (el servicio atiende SIGTERM)
+      terminationGracePeriodSeconds: 30
+
+      # Reparte las replicas entre zonas de disponibilidad. "ScheduleAnyway"
+      # lo prefiere pero no deja pods en Pending si una zona no tiene nodo;
+      # con "DoNotSchedule" seria obligatorio.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: catalog
+
+      containers:
+        - name: catalog
+          image: REPLACE_WITH_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/bookstore-catalog:1.0.0
+          ports:
+            - name: grpc
+              containerPort: 50051
+          envFrom:
+            - configMapRef:
+                name: catalog-config
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: db-catalog
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-catalog
+                  key: DB_PASSWORD
+          # gRPC no tiene /health HTTP: se comprueba que el puerto acepte
+          # conexiones TCP.
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog
+  namespace: bookstore
+  labels:
+    app: catalog
+spec:
+  # Headless: el DNS devuelve la IP de CADA pod (no una IP virtual unica).
+  # Es lo que permite al cliente gRPC repartir las llamadas con round_robin;
+  # con un Service normal todas irian al mismo pod.
+  clusterIP: None
+  selector:
+    app: catalog
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc

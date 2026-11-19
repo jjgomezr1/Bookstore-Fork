@@ -1,0 +1,136 @@
+# Servicio Events: clickstream (gRPC :50053). No usa base de datos.
+# Escribe los eventos en un archivo; el sidecar Vector lo envia a S3.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: events-config
+  namespace: bookstore
+data:
+  NODE_ENV: "production"
+  SERVICE_NAME: "events"
+  GRPC_BIND_ADDRESS: "0.0.0.0:50053"
+
+  ACCESS_LOG_ENABLED: "true"
+  ACCESS_LOG_EXCLUDE_PATHS: "/health"
+  ACCESS_LOG_MAX_FIELD_LENGTH: "2048"
+  ACCESS_LOG_REQUEST_ID_HEADER: "X-Request-Id"
+  CLICKSTREAM_FILE_ENABLED: "true"
+  CLICKSTREAM_FILE_PATH: "/usr/src/app/logs/clickstream.log"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: events
+  namespace: bookstore
+  labels:
+    app: events
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: events
+  template:
+    metadata:
+      labels:
+        app: events
+    spec:
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: events
+
+      volumes:
+        # Carpeta compartida por los dos contenedores del pod: el servicio
+        # escribe el archivo y Vector lo lee. Vive y muere con el pod.
+        - name: clickstream-logs
+          emptyDir: {}
+        # Donde Vector guarda hasta que linea del archivo ya envio
+        - name: vector-data
+          emptyDir: {}
+        - name: vector-config
+          configMap:
+            name: vector-config
+
+      containers:
+        - name: events
+          image: REPLACE_WITH_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/bookstore-events:1.0.0
+          ports:
+            - name: grpc
+              containerPort: 50053
+          envFrom:
+            - configMapRef:
+                name: events-config
+          volumeMounts:
+            - name: clickstream-logs
+              mountPath: /usr/src/app/logs
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+
+        # Sidecar: lee el archivo del volumen compartido y lo envia a S3
+        - name: vector
+          image: timberio/vector:0.43.1-alpine
+          args: ["--config", "/etc/vector/vector.yaml"]
+          # Credenciales de AWS: del rol del nodo o, si no son alcanzables,
+          # del Secret opcional "aws-credentials" (ver k8s/README.md)
+          envFrom:
+            - secretRef:
+                name: aws-credentials
+                optional: true
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+            - name: S3_BUCKET
+              value: REPLACE_WITH_CLICKSTREAM_BUCKET
+            - name: SERVICE_NAME
+              value: events
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+            - name: clickstream-logs
+              mountPath: /logs
+              readOnly: true
+            - name: vector-data
+              mountPath: /var/lib/vector
+            - name: vector-config
+              mountPath: /etc/vector
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: events
+  namespace: bookstore
+  labels:
+    app: events
+spec:
+  clusterIP: None # headless, para round_robin
+  selector:
+    app: events
+  ports:
+    - name: grpc
+      port: 50053
+      targetPort: grpc

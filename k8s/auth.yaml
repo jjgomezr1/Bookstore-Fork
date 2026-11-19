@@ -1,0 +1,108 @@
+# Servicio Auth: clientes y sesion (gRPC :50052, esquema "auth").
+# Emite los JWT; el BFF los verifica con el mismo secreto.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-config
+  namespace: bookstore
+data:
+  NODE_ENV: "production"
+  SERVICE_NAME: "auth"
+  GRPC_BIND_ADDRESS: "0.0.0.0:50052"
+
+  DB_HOST: "REPLACE_WITH_RDS_ENDPOINT"
+  DB_PORT: "5432"
+  DB_NAME: "bookstore"
+  DB_SCHEMA: "auth"
+  DB_SSL: "true"
+  DB_SSL_REJECT_UNAUTHORIZED: "false"
+  DB_POOL_MAX: "10"
+  DB_IDLE_TIMEOUT_MS: "30000"
+  DB_CONNECTION_TIMEOUT_MS: "5000"
+
+  AUTH_JWT_ALGORITHM: "HS256"
+  AUTH_JWT_ISSUER: "bookstore-api"
+  AUTH_JWT_AUDIENCE: "bookstore-web"
+  AUTH_TOKEN_TTL_SECONDS: "28800"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+  namespace: bookstore
+  labels:
+    app: auth
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: auth
+  template:
+    metadata:
+      labels:
+        app: auth
+    spec:
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: auth
+      containers:
+        - name: auth
+          image: REPLACE_WITH_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/bookstore-auth:1.0.0
+          ports:
+            - name: grpc
+              containerPort: 50052
+          envFrom:
+            - configMapRef:
+                name: auth-config
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: db-auth
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-auth
+                  key: DB_PASSWORD
+            - name: AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jwt
+                  key: AUTH_JWT_SECRET
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth
+  namespace: bookstore
+  labels:
+    app: auth
+spec:
+  clusterIP: None # headless, para round_robin
+  selector:
+    app: auth
+  ports:
+    - name: grpc
+      port: 50052
+      targetPort: grpc
