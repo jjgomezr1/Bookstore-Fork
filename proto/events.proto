@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package events;
+
+service Events {
+  rpc RecordEvent(RecordEventRequest) returns (RecordEventResponse);
+}
+
+message RecordEventRequest {
+  string event_type = 1;
+  optional string resource_type = 2;
+  optional string resource_id = 3;
+  optional string isbn = 4;
+  optional string recommendation_id = 5;
+  optional string model_version = 6;
+  optional string experiment_id = 7;
+  optional int32 position = 8;
+  optional int32 quantity = 9;
+  optional string search_query = 10;
+  optional string session_id = 11;
+  optional string request_id = 12;
+  optional string customer_id = 13;
+}
+
+message RecordEventResponse {
+  bool recorded = 1;
+}

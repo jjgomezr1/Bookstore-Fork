@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package auth;
+
+service Auth {
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc GetCurrentUser(GetCurrentUserRequest) returns (User);
+}
+
+message User {
+  string customer_id = 1;
+  string first_name = 2;
+  string last_name = 3;
+  string email = 4;
+  string city = 5;
+  string country = 6;
+}
+
+message LoginRequest {
+  string email = 1;
+}
+
+message LoginResponse {
+  User user = 1;
+  string token = 2;
+  string session_id = 3;
+}
+
+message GetCurrentUserRequest {
+  string customer_id = 1;
+}
