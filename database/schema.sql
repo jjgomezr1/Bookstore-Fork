@@ -3,6 +3,10 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE OR REPLACE FUNCTION set_updated_at()
+CREATE SCHEMA IF NOT EXISTS auth;
+CREATE SCHEMA IF NOT EXISTS catalog;
+CREATE SCHEMA IF NOT EXISTS orders;
+
 RETURNS TRIGGER AS $$
 BEGIN
   NEW.updated_at = CURRENT_TIMESTAMP;
@@ -10,7 +14,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TABLE IF NOT EXISTS books (
+CREATE TABLE IF NOT EXISTS catalog.books (
   book_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   isbn VARCHAR(20) NOT NULL UNIQUE,
   title VARCHAR(255) NOT NULL,
@@ -27,7 +31,7 @@ CREATE TABLE IF NOT EXISTS books (
   deleted_at TIMESTAMPTZ
 );
 
-CREATE TABLE IF NOT EXISTS customers (
+CREATE TABLE IF NOT EXISTS auth.customers (
   customer_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   first_name VARCHAR(120) NOT NULL CHECK (BTRIM(first_name) <> ''),
   last_name VARCHAR(120) NOT NULL CHECK (BTRIM(last_name) <> ''),
@@ -39,13 +43,13 @@ CREATE TABLE IF NOT EXISTS customers (
   deleted_at TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_customers_active_email_lower
+CREATE UNIQUE INDEX IF NOT EXISTS auth.uq_customers_active_email_lower
   ON customers (LOWER(BTRIM(email)))
   WHERE deleted_at IS NULL;
 
-CREATE TABLE IF NOT EXISTS orders (
+CREATE TABLE IF NOT EXISTS orders.orders (
   order_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  customer_id UUID NOT NULL REFERENCES customers(customer_id) ON DELETE RESTRICT,
+  customer_id UUID NOT NULL,
   order_status VARCHAR(40) NOT NULL
     CHECK (order_status IN ('PLACED', 'COMPLETED', 'CANCELLED')),
   total_amount NUMERIC(12, 2) NOT NULL CHECK (total_amount >= 0),
@@ -55,10 +59,13 @@ CREATE TABLE IF NOT EXISTS orders (
   deleted_at TIMESTAMPTZ
 );
 
-CREATE TABLE IF NOT EXISTS order_items (
+CREATE TABLE IF NOT EXISTS orders.order_items (
   order_item_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  order_id UUID NOT NULL REFERENCES orders(order_id) ON DELETE RESTRICT,
-  book_id UUID NOT NULL REFERENCES books(book_id) ON DELETE RESTRICT,
+  order_id UUID NOT NULL REFERENCES orders.orders(order_id) ON DELETE RESTRICT,
+  book_id UUID NOT NULL,
+  isbn VARCHAR(20) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  author VARCHAR(255) NOT NULL,
   quantity INTEGER NOT NULL CHECK (quantity > 0),
   unit_price NUMERIC(12, 2) NOT NULL CHECK (unit_price >= 0),
   line_total NUMERIC(14, 2)
@@ -67,29 +74,29 @@ CREATE TABLE IF NOT EXISTS order_items (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
-CREATE INDEX IF NOT EXISTS idx_orders_order_timestamp ON orders(order_timestamp);
-CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
-CREATE INDEX IF NOT EXISTS idx_order_items_book_id ON order_items(book_id);
+CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders.orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_orders_order_timestamp ON orders.orders(order_timestamp);
+CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON orders.order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_items_book_id ON orders.order_items(book_id);
 
-DROP TRIGGER IF EXISTS trg_books_set_updated_at ON books;
+DROP TRIGGER IF EXISTS trg_books_set_updated_at ON catalog.books;
 CREATE TRIGGER trg_books_set_updated_at
-BEFORE UPDATE ON books
+BEFORE UPDATE ON catalog.books
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_customers_set_updated_at ON customers;
+DROP TRIGGER IF EXISTS trg_customers_set_updated_at ON auth.customers;
 CREATE TRIGGER trg_customers_set_updated_at
-BEFORE UPDATE ON customers
+BEFORE UPDATE ON auth.customers
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_orders_set_updated_at ON orders;
+DROP TRIGGER IF EXISTS trg_orders_set_updated_at ON orders.orders;
 CREATE TRIGGER trg_orders_set_updated_at
-BEFORE UPDATE ON orders
+BEFORE UPDATE ON orders.orders
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_order_items_set_updated_at ON order_items;
+DROP TRIGGER IF EXISTS trg_order_items_set_updated_at ON orders.order_items;
 CREATE TRIGGER trg_order_items_set_updated_at
-BEFORE UPDATE ON order_items
+BEFORE UPDATE ON orders.order_items
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 COMMIT;
