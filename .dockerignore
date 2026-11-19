@@ -1,0 +1,12 @@
+# Build context for the Node images is the repository root.
+# Keep it small and never send secrets or local installs to Docker.
+**/node_modules
+**/.env
+**/.env.*
+!**/.env.example
+.git
+backend
+frontend
+database
+k8s
+docs

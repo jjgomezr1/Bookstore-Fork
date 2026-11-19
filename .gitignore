@@ -51,4 +51,3 @@ database/rds/bootstrap.env
 # Course documents (kept outside the repository)
 docs/
 
-package-lock.json
