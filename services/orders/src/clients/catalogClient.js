@@ -35,8 +35,7 @@ const toAppError = (error) => {
   );
 };
 
-// Orders -> Catalog deadline. It must be shorter than the BFF -> Orders
-// deadline (8 s) so Orders can answer with its own error in time.
+// Orders -> Catalog deadline; shorter than BFF -> Orders (8 s) so Orders can answer first.
 const DEFAULT_TIMEOUT_MS = 3000;
 
 export const createCatalogClient = ({

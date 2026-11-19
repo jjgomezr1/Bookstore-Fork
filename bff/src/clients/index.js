@@ -4,11 +4,7 @@ import { loadProto } from "@bookstore/common/grpc/loader";
 
 import { createGrpcClient } from "./grpcClient.js";
 
-// Deadline of each BFF -> service call, in milliseconds.
-// Orders gets the longest one because it calls Catalog (3 s) before
-// answering, so it can still reply with its own error before the BFF
-// gives up. Events is fire-and-forget telemetry: it must never slow
-// the user down.
+// Deadline (ms) of each BFF -> service call; Orders is the longest because it calls Catalog first.
 const DEADLINES_MS = Object.freeze({
   auth: 2000,
   catalog: 2000,

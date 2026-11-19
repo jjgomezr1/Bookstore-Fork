@@ -44,8 +44,7 @@ export const createGrpcClient = ({
     ROUND_ROBIN_OPTIONS
   );
 
-  // Every call has a deadline: without one, a service that is down or
-  // frozen would keep the request waiting forever.
+  // Every call has a deadline: a service that is down or frozen must not hang the request.
   const call = (method, request, timeoutMs = defaultTimeoutMs) =>
     new Promise((resolve, reject) => {
       client[method](

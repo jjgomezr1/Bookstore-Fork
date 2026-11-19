@@ -170,8 +170,7 @@ SELECT
 
 \echo ''
 \echo '9. Schema isolation between services'
--- A service must not be able to read another service's data,
--- even though all schemas live in the same RDS instance.
+-- A service must not read another service's data, even in the same RDS instance
 SELECT :'catalog_user' AS role_name,
        has_table_privilege(:'catalog_user', 'orders.orders', 'SELECT') AS reads_orders,
        has_table_privilege(:'catalog_user', 'auth.customers', 'SELECT') AS reads_customers,
@@ -204,10 +203,7 @@ SELECT
 
 \echo ''
 \echo '10. Referential-integrity sanity check (inside the orders schema)'
--- order_items -> orders is a real foreign key (same service).
--- order_items.book_id -> catalog.books is a logical reference only:
--- it is guaranteed by the order saga (Catalog reserves stock before
--- Orders persists the order), not by a cross-schema constraint.
+-- order_items -> orders is a real FK; book_id -> catalog.books is logical (guaranteed by the saga)
 SELECT COUNT(*) = 0 AS referential_integrity_ok
 FROM orders.order_items oi
 LEFT JOIN orders.orders o ON o.order_id = oi.order_id

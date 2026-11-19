@@ -1,5 +1,4 @@
-# Build context for the Node images is the repository root.
-# Keep it small and never send secrets or local installs to Docker.
+# Build context is the repo root: keep it small, no secrets or node_modules.
 **/node_modules
 **/.env
 **/.env.*
