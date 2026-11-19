@@ -98,8 +98,15 @@ fi
 : "${DB_ADMIN_USER:?DB_ADMIN_USER is required}"
 : "${DB_ADMIN_PASSWORD:?DB_ADMIN_PASSWORD is required}"
 
-: "${APP_DB_USER:=bookstore_app}"
-: "${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}"
+# One least-privilege login role per microservice (schema-per-service)
+: "${AUTH_DB_USER:=auth_app}"
+: "${AUTH_DB_PASSWORD:?AUTH_DB_PASSWORD is required}"
+
+: "${CATALOG_DB_USER:=catalog_app}"
+: "${CATALOG_DB_PASSWORD:?CATALOG_DB_PASSWORD is required}"
+
+: "${ORDERS_DB_USER:=orders_app}"
+: "${ORDERS_DB_PASSWORD:?ORDERS_DB_PASSWORD is required}"
 
 : "${INGEST_DB_USER:=bookstore_ingest}"
 : "${INGEST_DB_PASSWORD:?INGEST_DB_PASSWORD is required}"
@@ -113,7 +120,9 @@ fi
 
 for secret in \
     "${DB_ADMIN_PASSWORD}" \
-    "${APP_DB_PASSWORD}" \
+    "${AUTH_DB_PASSWORD}" \
+    "${CATALOG_DB_PASSWORD}" \
+    "${ORDERS_DB_PASSWORD}" \
     "${INGEST_DB_PASSWORD}"
 do
 
@@ -178,8 +187,12 @@ log "Creating or reconciling runtime roles"
 psql \
     -X \
     -v ON_ERROR_STOP=1 \
-    -v app_user="${APP_DB_USER}" \
-    -v app_password="${APP_DB_PASSWORD}" \
+    -v auth_user="${AUTH_DB_USER}" \
+    -v auth_password="${AUTH_DB_PASSWORD}" \
+    -v catalog_user="${CATALOG_DB_USER}" \
+    -v catalog_password="${CATALOG_DB_PASSWORD}" \
+    -v orders_user="${ORDERS_DB_USER}" \
+    -v orders_password="${ORDERS_DB_PASSWORD}" \
     -v ingest_user="${INGEST_DB_USER}" \
     -v ingest_password="${INGEST_DB_PASSWORD}" \
     -f "${CREATE_ROLES_SQL}"
@@ -204,7 +217,9 @@ psql \
     -X \
     -v ON_ERROR_STOP=1 \
     -v db_name="${DB_NAME}" \
-    -v app_user="${APP_DB_USER}" \
+    -v auth_user="${AUTH_DB_USER}" \
+    -v catalog_user="${CATALOG_DB_USER}" \
+    -v orders_user="${ORDERS_DB_USER}" \
     -v ingest_user="${INGEST_DB_USER}" \
     -f "${GRANTS_SQL}"
 
@@ -227,7 +242,9 @@ log "Verifying database deployment"
 psql \
     -X \
     -v ON_ERROR_STOP=1 \
-    -v app_user="${APP_DB_USER}" \
+    -v auth_user="${AUTH_DB_USER}" \
+    -v catalog_user="${CATALOG_DB_USER}" \
+    -v orders_user="${ORDERS_DB_USER}" \
     -v ingest_user="${INGEST_DB_USER}" \
     -f "${VERIFY_SQL}"
 
