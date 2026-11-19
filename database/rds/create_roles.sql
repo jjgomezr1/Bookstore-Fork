@@ -5,22 +5,44 @@
 --   exist and converge to the credentials supplied at runtime.
 --
 -- Required psql variables:
---   app_user
---   app_password
---   ingest_user
---   ingest_password
+--   auth_user,    auth_password
+--   catalog_user, catalog_password
+--   orders_user,  orders_password
+--   ingest_user,  ingest_password
 -- ============================================================
 
 \set ON_ERROR_STOP on
 
 SELECT format(
   CASE
-    WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app_user')
+    WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'catalog_user')
       THEN 'ALTER ROLE %I LOGIN PASSWORD %L'
     ELSE 'CREATE ROLE %I LOGIN PASSWORD %L'
   END,
-  :'app_user',
-  :'app_password'
+  :'catalog_user',
+  :'catalog_password'
+)
+\gexec
+
+SELECT format(
+  CASE
+    WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'auth_user')
+      THEN 'ALTER ROLE %I LOGIN PASSWORD %L'
+    ELSE 'CREATE ROLE %I LOGIN PASSWORD %L'
+  END,
+  :'auth_user',
+  :'auth_password'
+)
+\gexec
+
+SELECT format(
+  CASE
+    WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'orders_user')
+      THEN 'ALTER ROLE %I LOGIN PASSWORD %L'
+    ELSE 'CREATE ROLE %I LOGIN PASSWORD %L'
+  END,
+  :'orders_user',
+  :'orders_password'
 )
 \gexec
 
