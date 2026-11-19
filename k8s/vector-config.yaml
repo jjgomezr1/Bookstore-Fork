@@ -1,0 +1,38 @@
+# Configuracion del sidecar Vector, compartida por el BFF y Events.
+#
+# El servicio escribe el clickstream en /usr/src/app/logs/clickstream.log
+# (un volumen emptyDir). El sidecar monta ese mismo volumen, lee el archivo
+# linea por linea y lo envia a S3 comprimido, por lotes de 60 s.
+# ${...} lo resuelve Vector con las variables de entorno del contenedor.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-config
+  namespace: bookstore
+data:
+  vector.yaml: |
+    data_dir: /var/lib/vector
+
+    sources:
+      clickstream:
+        type: file
+        include:
+          - /logs/clickstream.log
+        read_from: beginning
+
+    sinks:
+      s3:
+        type: aws_s3
+        inputs:
+          - clickstream
+        bucket: "${S3_BUCKET}"
+        region: "${AWS_REGION}"
+        # clickstream/<servicio>/<pod>/AAAA/MM/DD/: un prefijo por pod evita
+        # que dos replicas pisen el mismo objeto.
+        key_prefix: "clickstream/${SERVICE_NAME}/${POD_NAME}/%Y/%m/%d/"
+        compression: gzip
+        encoding:
+          codec: text
+        batch:
+          timeout_secs: 60
+          max_bytes: 5000000
