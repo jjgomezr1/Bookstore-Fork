@@ -1,6 +1,66 @@
-# Local environment: PostgreSQL, database bootstrap, backend and frontend.
+# Local environment: PostgreSQL, database bootstrap, the BFF, the four
+# gRPC microservices (auth, catalog, orders, events) and the frontend.
 #
 # Usage: docker compose up --build
+#
+# Request flow:
+#   browser -> frontend (Nginx) -> bff (HTTP) -> auth / catalog / orders / events (gRPC)
+#                                                 orders -> catalog (gRPC, stock saga)
+
+# ------------------------------------------------------------
+# Reusable blocks (YAML anchors). "x-" keys are ignored by Compose;
+# "&name" defines a block and "<<: *name" pastes it into a service.
+# ------------------------------------------------------------
+
+# Every Node image is built from the repository root, because the
+# Dockerfiles copy packages/common and proto/ besides the service.
+x-node-build-args: &node-build-args
+  NODE_IMAGE: ${NODE_IMAGE:?NODE_IMAGE is required}
+
+# Connection settings shared by every service that uses PostgreSQL.
+# Each service adds its own DB_SCHEMA, DB_USER and DB_PASSWORD.
+x-db-client-env: &db-client-env
+  DB_HOST: ${DB_HOST:?DB_HOST is required}
+  DB_PORT: ${DB_PORT:?DB_PORT is required}
+  DB_NAME: ${DB_NAME:?DB_NAME is required}
+  DB_SSL: ${DB_SSL:?DB_SSL is required}
+  DB_SSL_REJECT_UNAUTHORIZED: ${DB_SSL_REJECT_UNAUTHORIZED:?DB_SSL_REJECT_UNAUTHORIZED is required}
+  DB_POOL_MAX: ${DB_POOL_MAX:?DB_POOL_MAX is required}
+  DB_IDLE_TIMEOUT_MS: ${DB_IDLE_TIMEOUT_MS:?DB_IDLE_TIMEOUT_MS is required}
+  DB_CONNECTION_TIMEOUT_MS: ${DB_CONNECTION_TIMEOUT_MS:?DB_CONNECTION_TIMEOUT_MS is required}
+
+# Session token settings (the BFF verifies tokens, Auth issues them).
+x-jwt-env: &jwt-env
+  AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?AUTH_JWT_SECRET is required}
+  AUTH_JWT_ALGORITHM: ${AUTH_JWT_ALGORITHM:?AUTH_JWT_ALGORITHM is required}
+  AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:?AUTH_JWT_ISSUER is required}
+  AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:?AUTH_JWT_AUDIENCE is required}
+  AUTH_TOKEN_TTL_SECONDS: ${AUTH_TOKEN_TTL_SECONDS:?AUTH_TOKEN_TTL_SECONDS is required}
+
+# Access log / clickstream settings (BFF and Events write the file).
+x-log-env: &log-env
+  ACCESS_LOG_ENABLED: ${ACCESS_LOG_ENABLED:?ACCESS_LOG_ENABLED is required}
+  ACCESS_LOG_EXCLUDE_PATHS: ${ACCESS_LOG_EXCLUDE_PATHS:?ACCESS_LOG_EXCLUDE_PATHS is required}
+  ACCESS_LOG_MAX_FIELD_LENGTH: ${ACCESS_LOG_MAX_FIELD_LENGTH:?ACCESS_LOG_MAX_FIELD_LENGTH is required}
+  ACCESS_LOG_REQUEST_ID_HEADER: ${ACCESS_LOG_REQUEST_ID_HEADER:?ACCESS_LOG_REQUEST_ID_HEADER is required}
+  CLICKSTREAM_FILE_ENABLED: ${CLICKSTREAM_FILE_ENABLED:?CLICKSTREAM_FILE_ENABLED is required}
+  CLICKSTREAM_FILE_PATH: ${CLICKSTREAM_FILE_PATH:?CLICKSTREAM_FILE_PATH is required}
+
+# The gRPC services have no HTTP /health endpoint: a service is
+# healthy when its gRPC port (taken from GRPC_BIND_ADDRESS) accepts
+# TCP connections.
+x-grpc-healthcheck: &grpc-healthcheck
+  test:
+    [
+      "CMD",
+      "node",
+      "-e",
+      "const port = process.env.GRPC_BIND_ADDRESS.split(':').pop(); require('net').connect(port, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1));"
+    ]
+  interval: 5s
+  timeout: 5s
+  retries: 10
+  start_period: 5s
 
 services:
   postgres:
@@ -33,7 +93,7 @@ services:
     networks:
       - back-tier
 
-  # One-shot container: creates roles, schema, grants and seed, then exits
+  # One-shot container: creates roles, schemas, grants and seed, then exits
   bootstrap:
     image: ${BOOTSTRAP_IMAGE:?BOOTSTRAP_IMAGE is required}
     restart: "no"
@@ -76,75 +136,181 @@ services:
     networks:
       - back-tier
 
-  backend:
-    image: ${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}/bookstore-backend:${IMAGE_TAG:?IMAGE_TAG is required}
+  # ----------------------------------------------------------
+  # gRPC microservices (only reachable inside back-tier)
+  # ----------------------------------------------------------
+
+  auth:
+    image: ${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}/bookstore-auth:${IMAGE_TAG:?IMAGE_TAG is required}
 
     build:
-      context: ./backend
-      args:
-        NODE_IMAGE: ${NODE_IMAGE:?NODE_IMAGE is required}
+      context: .
+      dockerfile: services/auth/Dockerfile
+      args: *node-build-args
 
     restart: unless-stopped
 
     environment:
+      <<: [*db-client-env, *jwt-env]
       NODE_ENV: ${NODE_ENV:?NODE_ENV is required}
-      SERVICE_NAME: ${SERVICE_NAME:?SERVICE_NAME is required}
-      PORT: ${PORT:?PORT is required}
-      API_BASE_PATH: ${API_BASE_PATH:?API_BASE_PATH is required}
-      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required}
+      SERVICE_NAME: auth
+      GRPC_BIND_ADDRESS: 0.0.0.0:${AUTH_GRPC_PORT:?AUTH_GRPC_PORT is required}
+      DB_SCHEMA: auth
+      DB_USER: ${AUTH_DB_USER:?AUTH_DB_USER is required}
+      DB_PASSWORD: ${AUTH_DB_PASSWORD:?AUTH_DB_PASSWORD is required}
 
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+
+    healthcheck: *grpc-healthcheck
+    init: true
+
+    networks:
+      - back-tier
+
+  catalog:
+    image: ${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}/bookstore-catalog:${IMAGE_TAG:?IMAGE_TAG is required}
+
+    build:
+      context: .
+      dockerfile: services/catalog/Dockerfile
+      args: *node-build-args
+
+    restart: unless-stopped
+
+    environment:
+      <<: *db-client-env
+      NODE_ENV: ${NODE_ENV:?NODE_ENV is required}
+      SERVICE_NAME: catalog
+      GRPC_BIND_ADDRESS: 0.0.0.0:${CATALOG_GRPC_PORT:?CATALOG_GRPC_PORT is required}
+      DB_SCHEMA: catalog
+      DB_USER: ${CATALOG_DB_USER:?CATALOG_DB_USER is required}
+      DB_PASSWORD: ${CATALOG_DB_PASSWORD:?CATALOG_DB_PASSWORD is required}
       BOOKS_DEFAULT_LIMIT: ${BOOKS_DEFAULT_LIMIT:?BOOKS_DEFAULT_LIMIT is required}
       BOOKS_MAX_LIMIT: ${BOOKS_MAX_LIMIT:?BOOKS_MAX_LIMIT is required}
 
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+
+    healthcheck: *grpc-healthcheck
+    init: true
+
+    networks:
+      - back-tier
+
+  orders:
+    image: ${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}/bookstore-orders:${IMAGE_TAG:?IMAGE_TAG is required}
+
+    build:
+      context: .
+      dockerfile: services/orders/Dockerfile
+      args: *node-build-args
+
+    restart: unless-stopped
+
+    environment:
+      <<: *db-client-env
+      NODE_ENV: ${NODE_ENV:?NODE_ENV is required}
+      SERVICE_NAME: orders
+      GRPC_BIND_ADDRESS: 0.0.0.0:${ORDERS_GRPC_PORT:?ORDERS_GRPC_PORT is required}
+      DB_SCHEMA: orders
+      DB_USER: ${ORDERS_DB_USER:?ORDERS_DB_USER is required}
+      DB_PASSWORD: ${ORDERS_DB_PASSWORD:?ORDERS_DB_PASSWORD is required}
       ORDERS_MAX_DISTINCT_ITEMS: ${ORDERS_MAX_DISTINCT_ITEMS:?ORDERS_MAX_DISTINCT_ITEMS is required}
       ORDERS_MAX_QUANTITY_PER_ITEM: ${ORDERS_MAX_QUANTITY_PER_ITEM:?ORDERS_MAX_QUANTITY_PER_ITEM is required}
+      # Orders calls Catalog to reserve and release stock (saga)
+      CATALOG_GRPC_ADDRESS: catalog:${CATALOG_GRPC_PORT:?CATALOG_GRPC_PORT is required}
 
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      catalog:
+        condition: service_healthy
+
+    healthcheck: *grpc-healthcheck
+    init: true
+
+    networks:
+      - back-tier
+
+  events:
+    image: ${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}/bookstore-events:${IMAGE_TAG:?IMAGE_TAG is required}
+
+    build:
+      context: .
+      dockerfile: services/events/Dockerfile
+      args: *node-build-args
+
+    restart: unless-stopped
+
+    # Events has no database: it only writes the clickstream file
+    environment:
+      <<: *log-env
+      NODE_ENV: ${NODE_ENV:?NODE_ENV is required}
+      SERVICE_NAME: events
+      GRPC_BIND_ADDRESS: 0.0.0.0:${EVENTS_GRPC_PORT:?EVENTS_GRPC_PORT is required}
+
+    volumes:
+      - events_logs:/usr/src/app/logs
+
+    healthcheck: *grpc-healthcheck
+    init: true
+
+    networks:
+      - back-tier
+
+  # ----------------------------------------------------------
+  # BFF: the only HTTP entry point for the SPA
+  # ----------------------------------------------------------
+
+  bff:
+    image: ${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}/bookstore-bff:${IMAGE_TAG:?IMAGE_TAG is required}
+
+    build:
+      context: .
+      dockerfile: bff/Dockerfile
+      args: *node-build-args
+
+    restart: unless-stopped
+
+    environment:
+      <<: [*jwt-env, *log-env]
+      NODE_ENV: ${NODE_ENV:?NODE_ENV is required}
+      SERVICE_NAME: bff
+      PORT: ${PORT:?PORT is required}
+      API_BASE_PATH: ${API_BASE_PATH:?API_BASE_PATH is required}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required}
       HTTP_TRUST_PROXY_HOPS: ${HTTP_TRUST_PROXY_HOPS:?HTTP_TRUST_PROXY_HOPS is required}
       HTTP_JSON_BODY_LIMIT: ${HTTP_JSON_BODY_LIMIT:?HTTP_JSON_BODY_LIMIT is required}
-
-      ACCESS_LOG_ENABLED: ${ACCESS_LOG_ENABLED:?ACCESS_LOG_ENABLED is required}
-      ACCESS_LOG_EXCLUDE_PATHS: ${ACCESS_LOG_EXCLUDE_PATHS:?ACCESS_LOG_EXCLUDE_PATHS is required}
-      ACCESS_LOG_MAX_FIELD_LENGTH: ${ACCESS_LOG_MAX_FIELD_LENGTH:?ACCESS_LOG_MAX_FIELD_LENGTH is required}
-      ACCESS_LOG_REQUEST_ID_HEADER: ${ACCESS_LOG_REQUEST_ID_HEADER:?ACCESS_LOG_REQUEST_ID_HEADER is required}
-
-      CLICKSTREAM_FILE_ENABLED: ${CLICKSTREAM_FILE_ENABLED:?CLICKSTREAM_FILE_ENABLED is required}
-      CLICKSTREAM_FILE_PATH: ${CLICKSTREAM_FILE_PATH:?CLICKSTREAM_FILE_PATH is required}
-
-      # Runtime database identity (least privilege, never the admin role)
-      DB_HOST: ${DB_HOST:?DB_HOST is required}
-      DB_PORT: ${DB_PORT:?DB_PORT is required}
-      DB_NAME: ${DB_NAME:?DB_NAME is required}
-      DB_USER: ${APP_DB_USER:?APP_DB_USER is required}
-      DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}
-
-      DB_SSL: ${DB_SSL:?DB_SSL is required}
-      DB_SSL_REJECT_UNAUTHORIZED: ${DB_SSL_REJECT_UNAUTHORIZED:?DB_SSL_REJECT_UNAUTHORIZED is required}
-
-      DB_POOL_MAX: ${DB_POOL_MAX:?DB_POOL_MAX is required}
-      DB_IDLE_TIMEOUT_MS: ${DB_IDLE_TIMEOUT_MS:?DB_IDLE_TIMEOUT_MS is required}
-      DB_CONNECTION_TIMEOUT_MS: ${DB_CONNECTION_TIMEOUT_MS:?DB_CONNECTION_TIMEOUT_MS is required}
-
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?AUTH_JWT_SECRET is required}
-      AUTH_JWT_ALGORITHM: ${AUTH_JWT_ALGORITHM:?AUTH_JWT_ALGORITHM is required}
-      AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:?AUTH_JWT_ISSUER is required}
-      AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:?AUTH_JWT_AUDIENCE is required}
-      AUTH_TOKEN_TTL_SECONDS: ${AUTH_TOKEN_TTL_SECONDS:?AUTH_TOKEN_TTL_SECONDS is required}
 
       AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:?AUTH_COOKIE_NAME is required}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:?AUTH_COOKIE_SECURE is required}
       AUTH_COOKIE_SAME_SITE: ${AUTH_COOKIE_SAME_SITE:?AUTH_COOKIE_SAME_SITE is required}
       AUTH_COOKIE_PATH: ${AUTH_COOKIE_PATH:?AUTH_COOKIE_PATH is required}
 
+      # gRPC addresses: <service name in this file>:<port>
+      AUTH_GRPC_ADDRESS: auth:${AUTH_GRPC_PORT:?AUTH_GRPC_PORT is required}
+      CATALOG_GRPC_ADDRESS: catalog:${CATALOG_GRPC_PORT:?CATALOG_GRPC_PORT is required}
+      ORDERS_GRPC_ADDRESS: orders:${ORDERS_GRPC_PORT:?ORDERS_GRPC_PORT is required}
+      EVENTS_GRPC_ADDRESS: events:${EVENTS_GRPC_PORT:?EVENTS_GRPC_PORT is required}
+
     ports:
-      - "${BACKEND_HOST_PORT:?BACKEND_HOST_PORT is required}:${PORT:?PORT is required}"
+      - "${BFF_HOST_PORT:?BFF_HOST_PORT is required}:${PORT:?PORT is required}"
 
     volumes:
-      - clickstream_logs:/usr/src/app/logs
+      - bff_logs:/usr/src/app/logs
 
-    # The backend starts only after the database has been bootstrapped
     depends_on:
-      bootstrap:
-        condition: service_completed_successfully
+      auth:
+        condition: service_healthy
+      catalog:
+        condition: service_healthy
+      orders:
+        condition: service_healthy
+      events:
+        condition: service_healthy
 
     healthcheck:
       test:
@@ -187,7 +353,7 @@ services:
       - "${FRONTEND_HOST_PORT:?FRONTEND_HOST_PORT is required}:${NGINX_PORT:?NGINX_PORT is required}"
 
     depends_on:
-      backend:
+      bff:
         condition: service_healthy
 
     networks:
@@ -195,7 +361,8 @@ services:
 
 volumes:
   postgres_data:
-  clickstream_logs:
+  bff_logs:
+  events_logs:
 
 networks:
   front-tier:
