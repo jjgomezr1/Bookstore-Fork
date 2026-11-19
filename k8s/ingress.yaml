@@ -1,6 +1,6 @@
 # Entrada al cluster: un Application Load Balancer (EKS Auto Mode) que
-# publica /api hacia el BFF. La SPA no pasa por aqui: Cloudflare envia
-# /* al bucket S3 y /api/* a este ALB.
+# publica /api hacia el BFF. La SPA no pasa por aqui: vive en Netlify, que
+# reenvia (proxy) /api/* a este ALB (ver frontend/netlify.toml).
 #
 # IngressClass y IngressClassParams son recursos del cluster (no tienen
 # namespace); el Ingress si vive en "bookstore".

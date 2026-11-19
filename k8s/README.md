@@ -1,14 +1,14 @@
 # Despliegue en AWS (EKS)
 
 Guía para desplegar los microservicios según el diagrama de arquitectura:
-Cloudflare → ALB → BFF → servicios gRPC en EKS → RDS, con la SPA en S3 y los
-logs de clickstream enviados a S3 por un sidecar Vector.
+Netlify (SPA) → ALB → BFF → servicios gRPC en EKS → RDS, con los logs de
+clickstream enviados a S3 por un sidecar Vector.
 
 ```text
-Usuarios ─HTTPS─▶ Cloudflare ─ /*     ─▶ S3 (SPA)
-                            └ /api/*  ─▶ ALB ─▶ bff ─gRPC─▶ auth · catalog · orders · events
-                                                              │
-                                              RDS (un esquema por servicio)
+Usuarios ─HTTPS─▶ Netlify ─ /*     ─▶ la SPA (frontend/dist)
+                          └ /api/*  ─proxy─▶ ALB ─▶ bff ─gRPC─▶ auth · catalog · orders · events
+                                                                  │
+                                                  RDS (un esquema por servicio)
 bff y events ─ sidecar Vector ─▶ S3 (clickstream)
 ```
 
@@ -21,13 +21,14 @@ bff y events ─ sidecar Vector ─▶ S3 (clickstream)
 | `catalog.yaml`, `auth.yaml`, `orders.yaml`, `events.yaml` | ConfigMap + Deployment + Service **headless** (gRPC) |
 | `bff.yaml` | ConfigMap + Deployment + Service ClusterIP (HTTP :5001) |
 | `ingress.yaml` | IngressClass/Params del ALB + Ingress `/api` → `bff` |
-| `secrets.yaml.example` | Ejemplo de los Secrets (no se aplica; ver paso 5) |
+
+Los Secrets no están en esta carpeta: se crean con `kubectl` (paso 5).
 
 ## Requisitos
 
 - Cuenta de AWS (Learner Lab) con `aws` CLI configurada, `kubectl` y Docker con `buildx`.
 - Los 3 recursos de AWS del diagrama creados: **ECR** (5 repositorios), **RDS** PostgreSQL y **EKS**.
-- Dos buckets de S3: uno para la SPA y otro para el clickstream.
+- Un bucket de S3 para el clickstream y una cuenta de Netlify para la SPA.
 
 ## 1. Imágenes en ECR
 
@@ -51,10 +52,13 @@ etiqueta que usan los manifiestos (`1.0.0`; si publicas otra, cámbiala en los
    Termina con `Verification completed successfully`: crea los esquemas, los
    roles y el seed, y comprueba que cada servicio solo ve su esquema.
 
-## 3. Buckets de S3
+## 3. Bucket de S3 y sitio en Netlify
 
 - **Clickstream:** un bucket privado. Su nombre va en `S3_BUCKET` del sidecar.
-- **SPA:** un bucket para `frontend/dist/` (`npm run build` en `frontend/`).
+- **SPA:** crea el sitio en Netlify conectado a este repositorio, con *Base
+  directory* = `frontend` (usa `frontend/netlify.toml`). Anota su dominio
+  (`<algo>.netlify.app`): lo necesita el BFF en `CORS_ORIGINS` (paso 4). Aún no
+  despliegues: falta el DNS del ALB (paso 7).
 
 ## 4. Reemplazar los marcadores
 
@@ -64,13 +68,14 @@ Los manifiestos traen valores `REPLACE_WITH_...` que debes cambiar:
 sed -i "s|REPLACE_WITH_ACCOUNT_ID|<tu-cuenta>|g"             k8s/*.yaml
 sed -i "s|REPLACE_WITH_RDS_ENDPOINT|<endpoint-de-rds>|g"     k8s/*.yaml
 sed -i "s|REPLACE_WITH_CLICKSTREAM_BUCKET|<bucket>|g"        k8s/*.yaml
-sed -i "s|REPLACE_WITH_CLOUDFLARE_DOMAIN|<tu-dominio>|g"     k8s/*.yaml
+sed -i "s|REPLACE_WITH_NETLIFY_DOMAIN|<algo>.netlify.app|g"  k8s/*.yaml
 ```
 
 ## 5. Secrets
 
-Los Secrets reales no se suben al repositorio. Créalos en el cluster
-(`secrets.yaml.example` muestra su forma):
+Los Secrets no se suben al repositorio: se crean directamente en el cluster.
+Cada servicio con base de datos recibe solo la contraseña de **su** rol, y el
+secreto `jwt` lo usan Auth (para emitir tokens) y el BFF (para verificarlos):
 
 ```bash
 kubectl apply -f k8s/00-namespace.yaml
@@ -95,17 +100,27 @@ muestran `2/2`: la aplicación y el sidecar Vector). Si un pod no arranca,
 común es una variable mal escrita, porque los servicios validan su
 configuración al iniciar.
 
-## 7. Cloudflare
+## 7. Conectar Netlify con el ALB
 
-Un solo dominio con dos orígenes: `/*` → bucket de la SPA y `/api/*` → el DNS
-del ALB (`kubectl -n bookstore get ingress bookstore`). Cloudflare termina el
-HTTPS; por eso las cookies son `Secure` y el BFF confía en 2 proxies
-(`HTTP_TRUST_PROXY_HOPS=2`).
+El ALB tarda un par de minutos en tener DNS:
+
+```bash
+kubectl -n bookstore get ingress bookstore       # columna ADDRESS
+```
+
+Pon ese valor en `frontend/netlify.toml` (reemplaza `<DNS-DEL-ALB>`), haz
+commit y push: Netlify construye y despliega. A partir de ahí Netlify sirve la
+SPA y reenvía `/api/*` al ALB, así que el navegador solo habla con un dominio
+(sin CORS). Netlify termina el HTTPS (por eso las cookies son `Secure`) y el BFF
+confía en 2 proxies delante: Netlify y el ALB (`HTTP_TRUST_PROXY_HOPS=2`).
+
+El tramo Netlify → ALB va por HTTP; es aceptable en el laboratorio. Con un
+dominio propio se le pondría un certificado al ALB.
 
 ## 8. Verificar
 
 ```bash
-curl https://<dominio>/api/books?limit=2          # lista libros (pasa por todo el camino)
+curl https://<algo>.netlify.app/api/books?limit=2   # lista libros (pasa por todo el camino)
 kubectl -n bookstore get pods -o wide             # réplicas repartidas entre zonas
 ```
 

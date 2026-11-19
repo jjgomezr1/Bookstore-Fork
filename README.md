@@ -66,7 +66,6 @@ como `.env` en su carpeta y cada archivo lo lee una herramienta distinta:
 | `.env.example`                     | `.env`                  | Docker Compose   | `docker compose ...` (todos los servicios)        |
 | `frontend/.env.example`            | `frontend/.env`         | Vite             | `npm run dev` o `npm run build` sin Docker        |
 | `bff/.env.example`, `services/*/.env.example` | `.env` en cada carpeta | dotenv (Node.js) | Ejecutar un servicio sin Docker       |
-| `.env.aws.example`                 | —                       | Referencia       | Documenta las variables del entorno de AWS (se aplican con los ConfigMap y Secret de `k8s/`) |
 | `database/rds/bootstrap.env.example` | `database/rds/bootstrap.env` | `bootstrap.sh` | Inicialización manual de Amazon RDS            |
 
 Las plantillas de `frontend/`, `bff/` y `services/` **no se usan** con Docker
@@ -163,16 +162,18 @@ npm install
 npm run dev
 ```
 
-### Build del frontend para Amazon S3
+### Build del frontend (Netlify)
 
 ```bash
 cd frontend
 npm run build
 ```
 
-El contenido de `frontend/dist/` es lo que se publica en el bucket. Las
-variables `VITE_*` se toman de `frontend/.env` y quedan incorporadas en el
-código compilado, por lo que no deben contener secretos.
+El contenido de `frontend/dist/` es lo que se publica. Las variables `VITE_*`
+se toman de `frontend/.env` y quedan incorporadas en el código compilado, por
+lo que no deben contener secretos. En Netlify, el build usa
+`frontend/netlify.toml`, que ya trae esas variables y el proxy de `/api/*`
+hacia el ALB.
 
 ## Publicar imágenes
 
@@ -246,9 +247,9 @@ La salida debe listar las plataformas `linux/amd64` y `linux/arm64`.
 
 Docker Compose se usa únicamente para el entorno local. En AWS los servicios
 corren en **Amazon EKS** (manifiestos en `k8s/`), la base de datos en **Amazon
-RDS**, la SPA en **Amazon S3** y el tráfico entra por **Cloudflare** y un
-**Application Load Balancer**. Los nombres de las variables son los mismos
-(`.env.aws.example`), pero se definen con ConfigMap y Secret.
+RDS** y la SPA en **Netlify**, que reenvía `/api/*` a un **Application Load
+Balancer**. Los nombres de las variables son los mismos que en local, pero se
+definen con ConfigMap y Secret.
 
 La guía paso a paso del despliegue está en [`k8s/README.md`](k8s/README.md).
 

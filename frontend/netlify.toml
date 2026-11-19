@@ -1,0 +1,32 @@
+# Despliegue de la SPA en Netlify.
+# En Netlify: "Base directory" = frontend (este archivo se lee desde ahi).
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+  # El build falla si falta alguna variable VITE_* (la exige vite.config.js) y
+  # frontend/.env no se sube al repositorio, asi que van aqui. No son secretos:
+  # quedan escritas en el codigo compilado.
+  [build.environment]
+    NODE_VERSION = "24"
+    VITE_API_BASE_URL = "/"
+    VITE_API_PREFIX = "/api"
+    VITE_CURRENCY_LOCALE = "es-CO"
+    VITE_CURRENCY_CODE = "COP"
+
+# /api/* se reenvia (proxy, status 200) al ALB del cluster. El navegador solo
+# habla con Netlify: mismo origen, sin CORS y la cookie de sesion es del dominio
+# de Netlify.
+# Reemplaza <DNS-DEL-ALB> con: kubectl -n bookstore get ingress bookstore
+[[redirects]]
+  from = "/api/*"
+  to = "http://<DNS-DEL-ALB>/api/:splat"
+  status = 200
+  force = true
+
+# Rutas de la SPA (react-router): cualquier otra ruta entrega index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
