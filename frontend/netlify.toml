@@ -12,10 +12,10 @@
     VITE_CURRENCY_LOCALE = "es-CO"
     VITE_CURRENCY_CODE = "COP"
 
-# /api/* va por proxy al ALB; reemplaza <DNS-DEL-ALB> (kubectl -n bookstore get ingress).
+# /api/* va por proxy al ALB (kubectl -n bookstore get ingress).
 [[redirects]]
   from = "/api/*"
-  to = "http://<DNS-DEL-ALB>/api/:splat"
+  to = "http://k8s-bookstor-bookstor-d296de3bb8-1058474769.us-east-1.elb.amazonaws.com/api/:splat"
   status = 200
   force = true
 
