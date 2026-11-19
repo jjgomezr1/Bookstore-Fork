@@ -9,7 +9,6 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
-!.env.aws.example
 *.pem
 *.key
 
