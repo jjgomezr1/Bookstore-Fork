@@ -15,6 +15,15 @@ const toAppError = (error) => {
     return new AppError(error.details || error.message, httpStatus, String(appCode));
   }
 
+  // Catalog did not answer before the deadline expired
+  if (error.code === grpc.status.DEADLINE_EXCEEDED) {
+    return new AppError(
+      "The catalog service did not respond in time",
+      504,
+      "UPSTREAM_TIMEOUT"
+    );
+  }
+
   return new AppError(
     "The catalog service is unavailable",
     503,
@@ -22,7 +31,15 @@ const toAppError = (error) => {
   );
 };
 
-export const createCatalogClient = ({ address, protoPath }) => {
+// Orders -> Catalog deadline. It must be shorter than the BFF -> Orders
+// deadline (8 s) so Orders can answer with its own error in time.
+const DEFAULT_TIMEOUT_MS = 3000;
+
+export const createCatalogClient = ({
+  address,
+  protoPath,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+}) => {
   const proto = loadProto(protoPath);
   const client = new proto.catalog.Catalog(
     address,
@@ -31,13 +48,18 @@ export const createCatalogClient = ({ address, protoPath }) => {
 
   const unaryCall = (method, request) =>
     new Promise((resolve, reject) => {
-      client[method](request, (error, response) => {
-        if (error) {
-          reject(toAppError(error));
-          return;
+      client[method](
+        request,
+        new grpc.Metadata(),
+        { deadline: Date.now() + timeoutMs },
+        (error, response) => {
+          if (error) {
+            reject(toAppError(error));
+            return;
+          }
+          resolve(response);
         }
-        resolve(response);
-      });
+      );
     });
 
   const reserveStock = async (items) => {

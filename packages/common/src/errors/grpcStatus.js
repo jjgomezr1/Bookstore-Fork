@@ -12,6 +12,7 @@ const HTTP_TO_GRPC_STATUS = Object.freeze({
   429: grpc.status.RESOURCE_EXHAUSTED,
   500: grpc.status.INTERNAL,
   503: grpc.status.UNAVAILABLE,
+  504: grpc.status.DEADLINE_EXCEEDED,
 });
 
 const GRPC_METADATA_HTTP_STATUS = "x-http-status";
