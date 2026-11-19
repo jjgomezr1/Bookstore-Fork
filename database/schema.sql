@@ -43,8 +43,8 @@ CREATE TABLE IF NOT EXISTS auth.customers (
   deleted_at TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS auth.uq_customers_active_email_lower
-  ON customers (LOWER(BTRIM(email)))
+CREATE UNIQUE INDEX IF NOT EXISTS uq_customers_active_email_lower
+  ON auth.customers (LOWER(BTRIM(email)))
   WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS orders.orders (
