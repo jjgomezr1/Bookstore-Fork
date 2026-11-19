@@ -12,6 +12,15 @@ const toAppError = (error, serviceName) => {
     return new AppError(error.details || error.message, httpStatus, String(appCode));
   }
 
+  // The service did not answer before the deadline expired
+  if (error.code === grpc.status.DEADLINE_EXCEEDED) {
+    return new AppError(
+      `The ${serviceName} service did not respond in time`,
+      504,
+      "UPSTREAM_TIMEOUT"
+    );
+  }
+
   return new AppError(
     `The ${serviceName} service is unavailable`,
     503,
@@ -19,18 +28,30 @@ const toAppError = (error, serviceName) => {
   );
 };
 
-export const createGrpcClient = ({ ServiceCtor, address, serviceName }) => {
+export const createGrpcClient = ({
+  ServiceCtor,
+  address,
+  serviceName,
+  defaultTimeoutMs,
+}) => {
   const client = new ServiceCtor(address, grpc.credentials.createInsecure());
 
-  const call = (method, request) =>
+  // Every call has a deadline: without one, a service that is down or
+  // frozen would keep the request waiting forever.
+  const call = (method, request, timeoutMs = defaultTimeoutMs) =>
     new Promise((resolve, reject) => {
-      client[method](request, (error, response) => {
-        if (error) {
-          reject(toAppError(error, serviceName));
-          return;
+      client[method](
+        request,
+        new grpc.Metadata(),
+        { deadline: Date.now() + timeoutMs },
+        (error, response) => {
+          if (error) {
+            reject(toAppError(error, serviceName));
+            return;
+          }
+          resolve(response);
         }
-        resolve(response);
-      });
+      );
     });
 
   const close = () => client.close();
