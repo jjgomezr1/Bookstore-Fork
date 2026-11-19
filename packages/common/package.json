@@ -1,0 +1,30 @@
+{
+  "name": "@bookstore/common",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared config, logging, errors, auth and database helpers for BookStore services",
+  "license": "MIT",
+  "exports": {
+    "./config/env": "./src/config/env.js",
+    "./config/logger": "./src/config/logger.js",
+    "./config/events": "./src/config/events.js",
+    "./errors/AppError": "./src/errors/AppError.js",
+    "./errors/grpcStatus": "./src/errors/grpcStatus.js",
+    "./auth/session": "./src/auth/session.js",
+    "./db/pool": "./src/db/pool.js",
+    "./clickstream/writer": "./src/clickstream/writer.js",
+    "./clickstream/formatter": "./src/clickstream/formatter.js",
+    "./grpc/loader": "./src/grpc/loader.js"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "1.14.0",
+    "@grpc/proto-loader": "0.7.13",
+    "dotenv": "17.2.3",
+    "jose": "6.2.10",
+    "pg": "8.16.3"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}
