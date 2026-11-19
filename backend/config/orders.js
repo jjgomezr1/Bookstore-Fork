@@ -1,5 +1,0 @@
-export const ORDER_STATUSES = Object.freeze({
-  PLACED: "PLACED",
-  COMPLETED: "COMPLETED",
-  CANCELLED: "CANCELLED",
-});
