@@ -15,7 +15,8 @@
     "./db/pool": "./src/db/pool.js",
     "./clickstream/writer": "./src/clickstream/writer.js",
     "./clickstream/formatter": "./src/clickstream/formatter.js",
-    "./grpc/loader": "./src/grpc/loader.js"
+    "./grpc/loader": "./src/grpc/loader.js",
+    "./grpc/clientOptions": "./src/grpc/clientOptions.js"
   },
   "dependencies": {
     "@grpc/grpc-js": "1.14.0",

@@ -2,6 +2,10 @@ import grpc from "@grpc/grpc-js";
 
 import { AppError } from "@bookstore/common/errors/AppError";
 import { GRPC_ERROR_METADATA } from "@bookstore/common/errors/grpcStatus";
+import {
+  ROUND_ROBIN_OPTIONS,
+  toDnsTarget,
+} from "@bookstore/common/grpc/clientOptions";
 import { loadProto } from "@bookstore/common/grpc/loader";
 
 const toAppError = (error) => {
@@ -42,8 +46,9 @@ export const createCatalogClient = ({
 }) => {
   const proto = loadProto(protoPath);
   const client = new proto.catalog.Catalog(
-    address,
-    grpc.credentials.createInsecure()
+    toDnsTarget(address),
+    grpc.credentials.createInsecure(),
+    ROUND_ROBIN_OPTIONS
   );
 
   const unaryCall = (method, request) =>

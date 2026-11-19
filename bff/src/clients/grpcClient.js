@@ -2,6 +2,10 @@ import grpc from "@grpc/grpc-js";
 
 import { AppError } from "@bookstore/common/errors/AppError";
 import { GRPC_ERROR_METADATA } from "@bookstore/common/errors/grpcStatus";
+import {
+  ROUND_ROBIN_OPTIONS,
+  toDnsTarget,
+} from "@bookstore/common/grpc/clientOptions";
 
 const toAppError = (error, serviceName) => {
   const metadata = error.metadata;
@@ -34,7 +38,11 @@ export const createGrpcClient = ({
   serviceName,
   defaultTimeoutMs,
 }) => {
-  const client = new ServiceCtor(address, grpc.credentials.createInsecure());
+  const client = new ServiceCtor(
+    toDnsTarget(address),
+    grpc.credentials.createInsecure(),
+    ROUND_ROBIN_OPTIONS
+  );
 
   // Every call has a deadline: without one, a service that is down or
   // frozen would keep the request waiting forever.
