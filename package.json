@@ -1,0 +1,16 @@
+{
+  "name": "bookstore-microservices",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "BookStore Co. microservices monorepo (gRPC + BFF)",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*",
+    "services/*",
+    "bff"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}
